@@ -16,6 +16,8 @@ private let asciiKeys: [Unicode.Scalar: Stroke] = {
         ("zxcvbnm,./", "ZXCVBNM<>?", [kVK_ANSI_Z, kVK_ANSI_X, kVK_ANSI_C, kVK_ANSI_V, kVK_ANSI_B, kVK_ANSI_N, kVK_ANSI_M, kVK_ANSI_Comma, kVK_ANSI_Period, kVK_ANSI_Slash])
     ]
     var keys: [Unicode.Scalar: Stroke] = [" ": Stroke(code: CGKeyCode(kVK_Space), shifted: false)]
+    keys["\n"] = Stroke(code: CGKeyCode(kVK_Return), shifted: false)
+    keys["\t"] = Stroke(code: CGKeyCode(kVK_Tab), shifted: false)
     for (plain, shifted, codes) in rows {
         for ((lower, upper), code) in zip(zip(plain.unicodeScalars, shifted.unicodeScalars), codes) {
             keys[lower] = Stroke(code: CGKeyCode(code), shifted: false)

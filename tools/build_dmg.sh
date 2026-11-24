@@ -8,7 +8,7 @@ app="$work/image/CMDPutin.app"
 resources="$app/Contents/Resources"
 iconset="$work/CMDPutin.iconset"
 mkdir -p "$iconset" "$resources" "$app/Contents/MacOS" "$root/dist"
-xcrun swiftc -O -target "$(uname -m)-apple-macos13.0" macOS/main.swift macOS/ConsoleKeyboard.swift -o "$app/Contents/MacOS/CMDPutin"
+xcrun swiftc -O -target "$(uname -m)-apple-macos13.0" macOS/*.swift -o "$app/Contents/MacOS/CMDPutin"
 cp macOS/Info.plist "$app/Contents/Info.plist"
 for icon in logo pin refresh send; do
     sips -s format png -z 96 96 "assets/$icon.svg" --out "$resources/$icon.png" >/dev/null
