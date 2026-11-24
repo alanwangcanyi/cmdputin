@@ -39,7 +39,10 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
     var settingsPanel: NSPanel?, historyPanel: NSPanel?
     let recorder = Recorder(), historyList = NSPopUpButton(), preview = NSTextView()
     let historyReuse = NSButton(), historyDelete = NSButton(), historyClear = NSButton()
-    var previouslySelected: Target?
+    private var pendingExternalApp: NSRunningApplication?
+    private var selectedElement: AXUIElement?
+    private var allowSavedTarget = true
+    private var reloadPending = false
     var confirming = false
     var editingAtEdge = false
 
@@ -50,6 +53,9 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        rememberFrontmostApplication()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(workspaceActivated(_:)),
+            name: NSWorkspace.didActivateApplicationNotification, object: nil)
         var startupErrors: [String] = []
         do { settings = try store.read("settings.json", default: settings) } catch { startupErrors.append("读取设置失败：\(error.localizedDescription)") }
         do { entries = try store.read("history.json", default: entries) } catch { startupErrors.append("读取历史失败：\(error.localizedDescription)") }
@@ -82,7 +88,9 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
         }
         let logo = NSImageView(); logo.image = image("logo", 32)
         place(logo, 22, 327, 32, 32)
-        place(label("CMDPutin", size: 19), 65, 330, 220, 27)
+        place(label("CMDPutin", size: 19), 65, 330, 155, 27)
+        let sidebar = NSButton(title: "收起到侧栏", target: self, action: #selector(collapseToSide))
+        place(sidebar, 230, 327, 108, 32)
         button(pin, "置顶", "pin", #selector(togglePin)); place(pin, 446, 327, 94, 32)
         let history = NSButton(title: "历史记录", target: self, action: #selector(openHistory))
         place(history, 344, 327, 96, 32)
@@ -130,7 +138,13 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
         applyMode(settings.startup == .last ? settings.lastMode : (settings.startup == .script ? .script : .command))
         applyPin()
         window.delegate = self; window.isReleasedWhenClosed = false
-        edge = EdgeDock(window: window, icon: image("logo", 18)); edge.enabled = settings.edgeEnabled
+        edge = EdgeDock(window: window, icon: image("logo", 36), position: settings.sidebarPosition, pinned: settings.sidebarPinned)
+        edge.enabled = settings.edgeEnabled
+        edge.onPositionChanged = { [weak self] position in
+            self?.settings.sidebarPosition = position
+            self?.saveSettings()
+        }
+        edge.onClick = { [weak self] in self?.summon() }
         edge.holdOpen = { [weak self] in
             guard let self else { return false }
             return self.confirming || self.command.hasMarkedText() || (self.window.isKeyWindow && self.editingAtEdge) || self.settingsPanel?.isVisible == true || self.historyPanel?.isVisible == true || NSApp.modalWindow != nil
@@ -139,6 +153,8 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
         let symbol = image("logo", 18); symbol?.isTemplate = true
         statusItem.button?.image = symbol; statusItem.button?.setAccessibilityLabel("CMDPutin")
         let tray = NSMenu(); addActions(to: tray)
+        let collapse = tray.insertItem(withTitle: "收起到侧边", action: #selector(collapseToSide), keyEquivalent: "", at: 1)
+        collapse.target = self
         tray.addItem(withTitle: "退出 CMDPutin", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         statusItem.menu = tray
         hotKey.show = { [weak self] in self?.summon() }
@@ -158,11 +174,39 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
         reload()
     }
 
+    func applicationDidChangeScreenParameters(_ notification: Notification) {
+        edge?.screensChanged()
+    }
+
+    @objc private func workspaceActivated(_ note: Notification) {
+        guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        if app.processIdentifier != getpid() {
+            pendingExternalApp = app
+        } else if selectRecentWindow() {
+            reload()
+        }
+    }
+
+    private func rememberFrontmostApplication() {
+        if let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() {
+            pendingExternalApp = app
+        }
+    }
+
+    @discardableResult private func selectRecentWindow() -> Bool {
+        guard let app = pendingExternalApp, AXIsProcessTrusted() else { return false }
+        pendingExternalApp = nil
+        selectedElement = focusedWindow(of: app)
+        allowSavedTarget = false
+        return true
+    }
+
     func applicationDidBecomeActive(_ notification: Notification) {
-        checkPermissionChange()
+        if selectRecentWindow() { reload() } else { checkPermissionChange() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         permissionTimer?.invalidate()
     }
 
@@ -194,20 +238,33 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
         if command.mode == .command, (try? command.mode.prepare(command.string)) == nil, command.string.contains("\n"), !command.hasMarkedText() { status.stringValue = "正文中有换行，可切换到多行脚本。" }
         else if !busy { status.stringValue = "" }
     }
+    @objc func collapseToSide() {
+        guard !confirming, NSApp.modalWindow == nil, let screen = window.screen ?? NSScreen.main else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.setActivationPolicy(.accessory)
+        edge.collapseToSide(in: screen)
+    }
     @objc func summon() {
         if NSApp.modalWindow != nil || confirming { NSApp.activate(ignoringOtherApps: true); return }
+        rememberFrontmostApplication()
+        selectRecentWindow()
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
         edge.expand(); window.deminiaturize(nil); NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil); window.makeFirstResponder(command); editingAtEdge = true
         reload()
     }
     func windowWillMove(_ notification: Notification) { edge.movedByUser(); editingAtEdge = false }
     func windowDidResignKey(_ notification: Notification) { editingAtEdge = false }
-    func windowWillClose(_ notification: Notification) { edge.reset() }
+    func windowWillClose(_ notification: Notification) {
+        edge.reset()
+        NSApp.setActivationPolicy(.accessory)
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { summon(); return false }
     @objc func targetChanged() {
         let i = targets.indexOfSelectedItem - 1
         guard windows.indices.contains(i) else { send.isEnabled = false; return }
-        previouslySelected = windows[i]; settings.target = windows[i].id; saveSettings(); send.isEnabled = true
+        selectedElement = windows[i].element
+        settings.target = windows[i].id; saveSettings(); send.isEnabled = true
         status.stringValue = ""
     }
 
@@ -218,7 +275,9 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
     }
 
     @objc func reload() {
-        guard !busy else { return }
+        guard !busy else { reloadPending = true; return }
+        reloadPending = false
+        if NSApp.isActive { selectRecentWindow() }
         targets.removeAllItems(); windows = []; send.isEnabled = false; targets.isEnabled = false
         let trusted = AXIsProcessTrusted()
         displayedTrust = trusted
@@ -236,21 +295,23 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
             let results = listTargets(apps)
             DispatchQueue.main.async {
                 self.busy = false; self.refresh.isEnabled = true
-                guard AXIsProcessTrusted() else { self.reload(); return }
+                guard AXIsProcessTrusted(), !self.reloadPending else { self.reload(); return }
                 self.windows = results; self.targets.removeAllItems()
                 self.targets.addItem(withTitle: results.isEmpty ? "未找到窗口" : "请选择目标窗口")
                 self.targets.item(at: 0)?.isEnabled = false
                 for target in results {
                     self.targets.menu?.addItem(withTitle: target.label, action: nil, keyEquivalent: "")
                 }
-                let matches = results.indices.filter { results[$0].id == self.settings.target }
                 var restored: Int?
-                if let previous = self.previouslySelected {
-                    restored = results.indices.first { CFEqual(results[$0].element, previous.element) }
-                    if let i = restored, results.filter({ $0.id == results[i].id }).count != 1 { restored = nil }
-                } else if matches.count == 1 { restored = matches[0] }
+                if let element = self.selectedElement {
+                    restored = results.firstIndex { CFEqual($0.element, element) }
+                } else if self.allowSavedTarget {
+                    let matches = results.indices.filter { results[$0].id == self.settings.target }
+                    if matches.count == 1 { restored = matches[0] }
+                }
                 if let index = restored {
-                    self.targets.selectItem(at: index + 1); self.previouslySelected = results[index]
+                    self.targets.selectItem(at: index + 1)
+                    self.selectedElement = results[index].element
                 } else { self.targets.selectItem(at: 0) }
                 self.targets.isEnabled = !results.isEmpty; self.send.isEnabled = restored != nil
                 self.status.stringValue = results.isEmpty ? "打开目标窗口后点刷新。" : (restored != nil ? "已选中最近使用的目标窗口。" : "请重新选择目标窗口。")
@@ -311,6 +372,7 @@ final class Typist: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextVie
                 self.send.isEnabled = true
                 self.refresh.isEnabled = true
                 self.targets.isEnabled = true
+                if self.reloadPending { self.reload() }
             }
         }
     }

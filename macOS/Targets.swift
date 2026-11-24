@@ -14,6 +14,16 @@ func attribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef? {
     return AXUIElementCopyAttributeValue(element, name, &value) == .success ? value : nil
 }
 
+// Match the AX window itself: one process can have several windows with identical titles.
+func focusedWindow(of app: NSRunningApplication) -> AXUIElement? {
+    guard !app.isTerminated, app.activationPolicy == .regular else { return nil }
+    let process = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(process, 0.25)
+    guard let value = attribute(process, kAXFocusedWindowAttribute as CFString),
+          CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return (value as! AXUIElement)
+}
+
 func listTargets(_ apps: [NSRunningApplication]) -> [Target] {
     var targets: [Target] = []
     for app in apps where app.activationPolicy == .regular && app.processIdentifier != getpid() {

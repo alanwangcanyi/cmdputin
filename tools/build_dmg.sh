@@ -8,7 +8,12 @@ app="$work/image/CMDPutin.app"
 resources="$app/Contents/Resources"
 iconset="$work/CMDPutin.iconset"
 mkdir -p "$iconset" "$resources" "$app/Contents/MacOS" "$root/dist"
-xcrun swiftc -O -target "$(uname -m)-apple-macos13.0" macOS/*.swift -o "$app/Contents/MacOS/CMDPutin"
+binary="$app/Contents/MacOS/CMDPutin"
+for arch in arm64 x86_64; do
+    xcrun swiftc -O -target "$arch-apple-macos13.0" macOS/*.swift -o "$work/CMDPutin-$arch"
+done
+xcrun lipo -create "$work/CMDPutin-arm64" "$work/CMDPutin-x86_64" -output "$binary"
+xcrun lipo "$binary" -verify_arch arm64 x86_64
 cp macOS/Info.plist "$app/Contents/Info.plist"
 for icon in logo pin refresh send; do
     sips -s format png -z 96 96 "assets/$icon.svg" --out "$resources/$icon.png" >/dev/null

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 enum InputMode: String, Codable, CaseIterable {
     case command, script
@@ -32,6 +33,28 @@ struct Shortcut: Codable, Equatable {
     var label = "⌃⌘V"
 }
 enum Startup: String, Codable, CaseIterable { case last, command, script }
+struct SidebarPosition: Codable, Equatable {
+    enum Side: String, Codable { case left, right }
+    var displayID: String
+    var side: Side
+    // 0 and 1 are the highest and lowest fully visible positions of the ball.
+    var heightFromTop: Double
+
+    var isValid: Bool { !displayID.isEmpty && (0...1).contains(heightFromTop) }
+
+    static func at(center: CGPoint, in bounds: CGRect, diameter: CGFloat, displayID: String) -> Self {
+        let travel = bounds.height - diameter
+        let fraction = travel > 0 ? (bounds.maxY - diameter / 2 - center.y) / travel : 0.5
+        return Self(displayID: displayID, side: center.x < bounds.midX ? .left : .right,
+                    heightFromTop: min(1, max(0, fraction)))
+    }
+
+    func origin(in bounds: CGRect, diameter: CGFloat) -> CGPoint {
+        CGPoint(x: side == .left ? bounds.minX : bounds.maxX - diameter,
+                y: bounds.maxY - diameter - heightFromTop * max(0, bounds.height - diameter))
+    }
+}
+
 struct Settings: Codable {
     var shortcut = Shortcut()
     var startup = Startup.last
@@ -40,6 +63,25 @@ struct Settings: Codable {
     var edgeEnabled = true
     var saveHistory = false
     var target: TargetID?
+    var sidebarPinned = true
+    var sidebarPosition: SidebarPosition?
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        shortcut = try fields.decode(Shortcut.self, forKey: .shortcut)
+        startup = try fields.decode(Startup.self, forKey: .startup)
+        lastMode = try fields.decode(InputMode.self, forKey: .lastMode)
+        pinned = try fields.decode(Bool.self, forKey: .pinned)
+        edgeEnabled = try fields.decode(Bool.self, forKey: .edgeEnabled)
+        saveHistory = try fields.decode(Bool.self, forKey: .saveHistory)
+        target = try fields.decodeIfPresent(TargetID.self, forKey: .target)
+        sidebarPinned = try fields.decodeIfPresent(Bool.self, forKey: .sidebarPinned) ?? true
+        if let saved = try? fields.decode(SidebarPosition.self, forKey: .sidebarPosition), saved.isValid {
+            sidebarPosition = saved
+        }
+    }
 }
 struct Entry: Codable {
     let date: Date

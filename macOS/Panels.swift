@@ -23,9 +23,9 @@ extension Typist {
     }
     @objc func openSettings() {
         if settingsPanel == nil {
-            let pane = panel("CMDPutin 设置", width: 455, height: 254)
+            let pane = panel("CMDPutin 设置", width: 455, height: 290)
             settingsPanel = pane
-            place(NSTextField(labelWithString: "全局唤起快捷键"), in: pane, 24, 207, 130, 20)
+            place(NSTextField(labelWithString: "全局唤起快捷键"), in: pane, 24, 243, 130, 20)
             recorder.bezelStyle = .rounded; recorder.display = settings.shortcut.label
             recorder.target = recorder; recorder.action = #selector(Recorder.start)
             recorder.apply = { [weak self] shortcut in
@@ -37,16 +37,19 @@ extension Typist {
                 } catch { self.inform(error.localizedDescription) }
             }
             NotificationCenter.default.addObserver(self, selector: #selector(endRecording), name: NSWindow.didResignKeyNotification, object: pane)
-            place(recorder, in: pane, 163, 202, 263, 32)
+            place(recorder, in: pane, 163, 238, 263, 32)
             let help = NSTextField(labelWithString: "点快捷键后按新组合，至少包含 ⌘、⌃ 或 ⌥。")
             help.font = .systemFont(ofSize: 12); help.textColor = .secondaryLabelColor
-            place(help, in: pane, 25, 176, 402, 20)
-            place(NSTextField(labelWithString: "启动输入模式"), in: pane, 24, 134, 130, 20)
+            place(help, in: pane, 25, 212, 402, 20)
+            place(NSTextField(labelWithString: "启动输入模式"), in: pane, 24, 170, 130, 20)
             let startup = NSPopUpButton(); startup.addItems(withTitles: ["沿用上次模式", "单条命令", "多行脚本"])
             startup.selectItem(at: Startup.allCases.firstIndex(of: settings.startup)!)
-            startup.target = self; startup.action = #selector(setStartup(_:)); place(startup, in: pane, 163, 129, 263, 32)
+            startup.target = self; startup.action = #selector(setStartup(_:)); place(startup, in: pane, 163, 165, 263, 32)
             let dock = NSButton(checkboxWithTitle: "拖到屏幕左侧或右侧时收起为 C 图标", target: self, action: #selector(setEdge(_:)))
-            dock.state = settings.edgeEnabled ? .on : .off; place(dock, in: pane, 24, 91, 400, 25)
+            dock.state = settings.edgeEnabled ? .on : .off; place(dock, in: pane, 24, 127, 400, 25)
+            let sidebarPin = NSButton(checkboxWithTitle: "侧栏图标置顶", target: self, action: #selector(setSidebarPinned(_:)))
+            sidebarPin.state = settings.sidebarPinned ? .on : .off
+            place(sidebarPin, in: pane, 24, 91, 400, 25)
             let history = NSButton(checkboxWithTitle: "在本机保存成功发送的历史记录", target: self, action: #selector(setHistory(_:)))
             history.state = settings.saveHistory ? .on : .off; place(history, in: pane, 24, 52, 400, 25)
             let note = NSTextField(labelWithString: "命令和脚本可能包含密码。已保存的记录可在历史窗口清空。")
@@ -60,6 +63,11 @@ extension Typist {
         settings.edgeEnabled = sender.state == .on
         if !settings.edgeEnabled { edge.disable() }
         edge.enabled = settings.edgeEnabled; saveSettings()
+    }
+    @objc private func setSidebarPinned(_ sender: NSButton) {
+        settings.sidebarPinned = sender.state == .on
+        edge.pinned = settings.sidebarPinned
+        saveSettings()
     }
     @objc private func setHistory(_ sender: NSButton) { settings.saveHistory = sender.state == .on; saveSettings() }
 
